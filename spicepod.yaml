@@ -1,0 +1,125 @@
+version: v1
+kind: Spicepod
+name: xlangai_bright
+
+# BRIGHT (https://huggingface.co/datasets/xlangai/BRIGHT), biology domain: StackExchange
+# questions whose relevant documents need reasoning to find, not keyword overlap.
+datasets:
+  - from: hf://datasets/xlangai/BRIGHT/documents/biology-00000-of-00001.parquet
+    name: docs
+    description: BRIGHT biology corpus. One row per passage of a web page.
+    acceleration:
+      enabled: true
+    columns:
+      - name: content
+        full_text_search:
+          enabled: true
+          row_id:
+            - id
+
+  - from: hf://datasets/xlangai/BRIGHT/examples/biology-00000-of-00001.parquet
+    name: queries
+    description: BRIGHT biology questions, with the ids of their relevant (gold_ids) and excluded (excluded_ids) passages.
+    acceleration:
+      enabled: true
+
+# One table function per setup. Each takes a question `q`, reranks the BM25 top 100, and
+# returns (id, score); order by score descending for the ranking:
+#
+#   SELECT id FROM bright_rerank_jev('Why are insects attracted to light?') ORDER BY score DESC LIMIT 10;
+#
+# `q` goes only to text_search: the function rewrites it to a literal there before planning.
+# rerank() takes its query from that search, so it has no `query =>` argument.
+functions:
+  - name: bm25
+    from: sql
+    kind: table
+    description: BM25 full-text search only, top 100.
+    signature:
+      args: [{ name: q, type: utf8 }]
+      returns:
+        - { name: id, type: utf8 }
+        - { name: score, type: float64 }
+    body: |
+      SELECT id, CAST(score AS DOUBLE) AS score
+      FROM text_search(docs, q, content, limit => 100)
+
+  - name: rerank_jev
+    from: sql
+    kind: table
+    description: BM25 top 100 reranked by jev with rerank(), pointwise.
+    signature:
+      args: [{ name: q, type: utf8 }]
+      returns:
+        - { name: id, type: utf8 }
+        - { name: score, type: float64 }
+    body: |
+      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      FROM rerank(text_search(docs, q, content, limit => 100), model => 'jev', document => 'content')
+
+  # rerank() asks a fixed relevance question. This asks jev BRIGHT's own definition of
+  # relevance instead, with a description of the collection. Also pointwise.
+  - name: jev_ask
+    from: sql
+    kind: table
+    description: BM25 top 100 scored by jev with ai_probability() and BRIGHT's definition of relevance.
+    signature:
+      args: [{ name: q, type: utf8 }]
+      returns:
+        - { name: id, type: utf8 }
+        - { name: score, type: float64 }
+    body: |
+      SELECT id, ai_probability(
+               named_struct(
+                 'collection', 'Passages from web pages (mostly Wikipedia and science articles) cited in answers on Biology StackExchange. Each question is a user''s post.',
+                 'question', q,
+                 'document', content),
+               'Does `document` contain knowledge that helps answer `question`, such as a concept, mechanism, or fact that a good answer would rely on, even if it does not use the question''s words?',
+               model => 'jev') AS score
+      FROM text_search(docs, q, content, limit => 100)
+
+  - name: rerank_luna
+    from: sql
+    kind: table
+    description: BM25 top 100 reranked by gpt-6-luna as an LLM judge, listwise.
+    signature:
+      args: [{ name: q, type: utf8 }]
+      returns:
+        - { name: id, type: utf8 }
+        - { name: score, type: float64 }
+    body: |
+      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      FROM rerank(text_search(docs, q, content, limit => 100), model => 'luna', document => 'content')
+
+  - name: rerank_opus
+    from: sql
+    kind: table
+    description: BM25 top 100 reranked by claude-opus-5-5 as an LLM judge, listwise.
+    signature:
+      args: [{ name: q, type: utf8 }]
+      returns:
+        - { name: id, type: utf8 }
+        - { name: score, type: float64 }
+    body: |
+      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      FROM rerank(text_search(docs, q, content, limit => 100), model => 'opus', document => 'content')
+
+models:
+  # Decision model: scores each candidate with a calibrated P(relevant).
+  - from: typesafe:jev
+    name: jev
+    params:
+      typesafe_api_key: ${secrets:JEV_API_KEY}
+
+  - from: openai:gpt-6-luna
+    name: luna
+    params:
+      openai_api_key: ${secrets:OPENAI_API_KEY}
+
+  - from: anthropic:claude-opus-5-5
+    name: opus
+    description: >-
+      LLM-as-a-judge rerankers (chat models).
+      rerank() sends them all candidates in one listwise prompt by default.
+    params:
+      anthropic_api_key: ${secrets:ANTHROPIC_API_KEY}
