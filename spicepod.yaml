@@ -8,6 +8,9 @@ datasets:
   - from: hf://datasets/xlangai/BRIGHT/documents/biology-00000-of-00001.parquet
     name: docs
     description: BRIGHT biology corpus. One row per passage of a web page.
+    params:
+      # Authenticated requests get higher Hugging Face rate limits.
+      hf_token: ${secrets:HF_TOKEN}
     acceleration:
       enabled: true
     columns:
@@ -20,6 +23,9 @@ datasets:
   - from: hf://datasets/xlangai/BRIGHT/examples/biology-00000-of-00001.parquet
     name: queries
     description: BRIGHT biology questions, with the ids of their relevant (gold_ids) and excluded (excluded_ids) passages.
+    params:
+      # Authenticated requests get higher Hugging Face rate limits.
+      hf_token: ${secrets:HF_TOKEN}
     acceleration:
       enabled: true
 
