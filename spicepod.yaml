@@ -39,8 +39,10 @@ datasets:
 #
 #   SELECT id FROM bright_rerank_jev('Why are insects attracted to light?') ORDER BY score DESC LIMIT 10;
 #
-# `q` goes only to text_search: the function rewrites it to a literal there before planning.
-# rerank() takes its query from that search, so it has no `query =>` argument.
+# Inside text_search, `q` is rewritten to a literal before planning. Anywhere else, read the
+# argument from the one-row `args` table (see jev_ask). rerank() takes its query from the
+# search, so it has no `query =>` argument. `id` is LargeUtf8 in the dataset; arrow_cast
+# makes it the declared utf8.
 functions:
   - name: bm25
     from: sql
@@ -52,7 +54,7 @@ functions:
         - { name: id, type: utf8 }
         - { name: score, type: float64 }
     body: |
-      SELECT id, CAST(score AS DOUBLE) AS score
+      SELECT arrow_cast(id, 'Utf8') AS id, CAST(_score AS DOUBLE) AS score
       FROM text_search(docs, q, content, limit => 100)
 
   - name: rerank_jev
@@ -65,7 +67,7 @@ functions:
         - { name: id, type: utf8 }
         - { name: score, type: float64 }
     body: |
-      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
       FROM rerank(text_search(docs, q, content, limit => 100), model => 'jev', document => 'content')
 
   # rerank() asks a fixed relevance question. This asks jev BRIGHT's own definition of
@@ -80,14 +82,15 @@ functions:
         - { name: id, type: utf8 }
         - { name: score, type: float64 }
     body: |
-      SELECT id, ai_probability(
+      SELECT arrow_cast(t.id, 'Utf8') AS id, ai_probability(
                named_struct(
                  'collection', 'Passages from web pages (mostly Wikipedia and science articles) cited in answers on Biology StackExchange. Each question is a user''s post.',
-                 'question', q,
-                 'document', content),
+                 'question', args.q,
+                 'document', t.content),
                'Does `document` contain knowledge that helps answer `question`, such as a concept, mechanism, or fact that a good answer would rely on, even if it does not use the question''s words?',
                model => 'jev') AS score
-      FROM text_search(docs, q, content, limit => 100)
+      FROM text_search(docs, q, content, limit => 100) AS t
+      CROSS JOIN args
 
   - name: rerank_luna
     from: sql
@@ -99,7 +102,7 @@ functions:
         - { name: id, type: utf8 }
         - { name: score, type: float64 }
     body: |
-      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
       FROM rerank(text_search(docs, q, content, limit => 100), model => 'luna', document => 'content')
 
   - name: rerank_opus
@@ -112,7 +115,7 @@ functions:
         - { name: id, type: utf8 }
         - { name: score, type: float64 }
     body: |
-      SELECT id, CAST(rerank_score AS DOUBLE) AS score
+      SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
       FROM rerank(text_search(docs, q, content, limit => 100), model => 'opus', document => 'content')
 
 models:
