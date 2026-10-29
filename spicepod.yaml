@@ -34,7 +34,7 @@ datasets:
     acceleration:
       enabled: true
 
-# One table function per setup. Each takes a question `q`, reranks the BM25 top 100, and
+# One table function per setup. Each takes a question `q`, reranks the BM25 top 50, and
 # returns (id, score); order by score descending for the ranking:
 #
 #   SELECT id FROM bright_rerank_jev('Why are insects attracted to light?') ORDER BY score DESC LIMIT 10;
@@ -47,7 +47,7 @@ functions:
   - name: bm25
     from: sql
     kind: table
-    description: BM25 full-text search only, top 100.
+    description: BM25 full-text search only, top 50.
     signature:
       args: [{ name: q, type: utf8 }]
       returns:
@@ -55,12 +55,12 @@ functions:
         - { name: score, type: float64 }
     body: |
       SELECT arrow_cast(id, 'Utf8') AS id, CAST(_score AS DOUBLE) AS score
-      FROM text_search(docs, q, content, limit => 100)
+      FROM text_search(docs, q, content, limit => 50)
 
   - name: rerank_jev
     from: sql
     kind: table
-    description: BM25 top 100 reranked by jev with rerank(), pointwise.
+    description: BM25 top 50 reranked by jev with rerank(), pointwise.
     signature:
       args: [{ name: q, type: utf8 }]
       returns:
@@ -68,14 +68,14 @@ functions:
         - { name: score, type: float64 }
     body: |
       SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
-      FROM rerank(text_search(docs, q, content, limit => 100), model => 'jev', document => 'content')
+      FROM rerank(text_search(docs, q, content, limit => 50), model => 'jev', document => 'content')
 
   # rerank() asks a fixed relevance question. This asks jev BRIGHT's own definition of
   # relevance instead, with a description of the collection. Also pointwise.
   - name: jev_ask
     from: sql
     kind: table
-    description: BM25 top 100 scored by jev with ai_probability() and BRIGHT's definition of relevance.
+    description: BM25 top 50 scored by jev with ai_probability() and BRIGHT's definition of relevance.
     signature:
       args: [{ name: q, type: utf8 }]
       returns:
@@ -89,13 +89,13 @@ functions:
                  'document', t.content),
                'Does `document` contain knowledge that helps answer `question`, such as a concept, mechanism, or fact that a good answer would rely on, even if it does not use the question''s words?',
                model => 'jev') AS score
-      FROM text_search(docs, q, content, limit => 100) AS t
+      FROM text_search(docs, q, content, limit => 50) AS t
       CROSS JOIN args
 
   - name: rerank_luna
     from: sql
     kind: table
-    description: BM25 top 100 reranked by gpt-6-luna as an LLM judge, listwise.
+    description: BM25 top 50 reranked by gpt-6-luna as an LLM judge, listwise.
     signature:
       args: [{ name: q, type: utf8 }]
       returns:
@@ -103,12 +103,12 @@ functions:
         - { name: score, type: float64 }
     body: |
       SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
-      FROM rerank(text_search(docs, q, content, limit => 100), model => 'luna', document => 'content')
+      FROM rerank(text_search(docs, q, content, limit => 50), model => 'luna', document => 'content')
 
   - name: rerank_opus
     from: sql
     kind: table
-    description: BM25 top 100 reranked by claude-opus-5-5 as an LLM judge, listwise.
+    description: BM25 top 50 reranked by claude-opus-5-5 as an LLM judge, listwise.
     signature:
       args: [{ name: q, type: utf8 }]
       returns:
@@ -116,7 +116,7 @@ functions:
         - { name: score, type: float64 }
     body: |
       SELECT arrow_cast(id, 'Utf8') AS id, CAST(rerank_score AS DOUBLE) AS score
-      FROM rerank(text_search(docs, q, content, limit => 100), model => 'opus', document => 'content')
+      FROM rerank(text_search(docs, q, content, limit => 50), model => 'opus', document => 'content')
 
 models:
   # Decision model: scores each candidate with a calibrated P(relevant).
