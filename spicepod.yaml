@@ -2,6 +2,11 @@ version: v1
 kind: Spicepod
 name: xlangai_bright
 
+# User-defined functions are disabled by default; the search pipelines below are `functions:`.
+runtime:
+  functions:
+    enabled: true
+
 # BRIGHT (https://huggingface.co/datasets/xlangai/BRIGHT), biology domain: StackExchange
 # questions whose relevant documents need reasoning to find, not keyword overlap.
 datasets:
